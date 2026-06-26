@@ -1,0 +1,15 @@
+name: neuroai
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy>=1.24
+  - scipy>=1.10
+  - matplotlib>=3.7
+  - nilearn>=0.10
+  - pip
+  - pip:
+      - torch>=2.0
+      - torch-geometric>=2.3
+      - geoopt>=0.5
+      - jupyter
