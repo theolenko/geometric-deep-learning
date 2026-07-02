@@ -101,8 +101,8 @@ def build_graph(cfg):
     # This bakes in cortical magnification: the fovea gets exponentially more
     # cortex per degree of visual field than the periphery.
     ret     = cfg["retinotopy"]
-    a_param = ret.get("a_param", 0.5)   # deg   — offset so that distance=0 → ~0° eccentricity
-    scale   = ret.get("scale",   15.0)  # mm    — controls how fast eccentricity grows
+    a_param = ret.get("a_param", 1.6)   # deg   — foveal offset; Schwartz (1980) p.659, citing Drasdo (1977)
+    scale   = ret.get("scale",   15.1)  # mm/deg — foveal magnification; Cowey & Rolls (1974) Table 1 p.452: 15.1 mm/deg
     k_param = ret.get("k_param", 0.065) # deg⁻¹ — magnification fall-off (Horton & Hoyt 1991)
 
     eccentricity  = np.exp(geo_from_pole / scale) - a_param
@@ -190,17 +190,30 @@ def make_splits(N, cfg):
 
 
 def hyperbolic_weights(distances, kappa):
-    # Maps Euclidean distances to hyperbolic distances with curvature κ.
-    # Formula: d_hyp = (2/√κ) · arcsinh(√κ/2 · d_euc)
+    # κ-parametrised distance transformation: d_hyp = (2/√κ) · arcsinh(√κ/2 · d_euc)
     # At κ=0 this reduces to d_euc (Euclidean baseline).
-    # At κ>0, large distances are compressed logarithmically — nodes that are
-    # far apart in brain space get a smaller effective distance in the GNN,
-    # which helps for the densely-packed fovea region where Euclidean distances
-    # overestimate how "different" nearby nodes actually are in the visual field.
+    # At κ>0, large distances are compressed more than small ones.
+    #
+    # Note: this is NOT a proper point-to-point distance in hyperbolic space.
+    # The arcsinh form appears in Ganea et al. (2018) but in the context of
+    # point-to-hyperplane distance in the Poincaré ball — a different geometric
+    # quantity. This transformation is motivated by hyperbolic geometry but does
+    # not constitute a mathematically rigorous hyperbolic embedding.
     if kappa == 0.0:
         return distances.copy()
     sq = np.sqrt(kappa)
     return (2.0 / sq) * np.arcsinh((sq / 2.0) * distances)
+
+
+def _vf_pseudo(graph):
+    # Relative visual-field position vectors per directed edge: (Δvf_x, Δvf_y).
+    # Order matches edge_index: first block u→v, second block v→u.
+    u, v  = graph["u_idx"], graph["v_idx"]
+    dvf_x = np.concatenate([graph["vf_x"][v] - graph["vf_x"][u],
+                             graph["vf_x"][u] - graph["vf_x"][v]])
+    dvf_y = np.concatenate([graph["vf_y"][v] - graph["vf_y"][u],
+                             graph["vf_y"][u] - graph["vf_y"][v]])
+    return np.column_stack([dvf_x, dvf_y]).astype(np.float32)  # (2E, 2)
 
 
 def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
@@ -211,6 +224,7 @@ def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
     # We duplicate each undirected edge, and duplicate the weights accordingly.
     ei = np.vstack([np.concatenate([u, v]), np.concatenate([v, u])])
     ea = np.concatenate([euc_w, euc_w])
+    ep = _vf_pseudo(graph)
 
     # data.x  = pRF responses, shape (N, 100) — the GNN input.
     #           Each row is one node. Each column is one stimulus.
@@ -223,7 +237,10 @@ def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
         x               = torch.tensor(responses, dtype=torch.float32),
         edge_index      = torch.tensor(ei, dtype=torch.long),
         edge_attr       = torch.tensor(ea, dtype=torch.float32),
+        edge_pseudo     = torch.tensor(ep),
         pos             = torch.tensor(graph["coords_vis"], dtype=torch.float32),
+        vf_pos          = torch.tensor(np.column_stack([graph["vf_x"],
+                                                        graph["vf_y"]]).astype(np.float32)),
         y               = torch.tensor(np.column_stack([graph["eccentricity"],
                                                         graph["polar_angle"]]).astype(np.float32)),
         eccentricity_gt = torch.tensor(graph["eccentricity"].astype(np.float32)),
@@ -243,29 +260,35 @@ def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
         'note': 'Same graph for every kappa. Pair with edges_kappa_*.pt files.',
     }}, path)
     print(f"saved: {path}")
-    print(f"  x: {tuple(data.x.shape)}  edge_index: {tuple(data.edge_index.shape)}  y: {tuple(data.y.shape)}")
+    print(f"  x: {tuple(data.x.shape)}  edge_index: {tuple(data.edge_index.shape)}"
+          f"  edge_pseudo: {tuple(data.edge_pseudo.shape)}  y: {tuple(data.y.shape)}")
 
 
 def save_hyperbolic(graph, kappa_values, out_dir):
-    euc_w = graph["euclidean_weights"]
-    geo   = graph["geo_from_pole"]
+    euc_w  = graph["euclidean_weights"]
+    geo    = graph["geo_from_pole"]
+    ep_euc = _vf_pseudo(graph)  # (2E, 2) Euclidean VF pseudo-coordinates
 
     for kappa in kappa_values:
         hyp_edges = hyperbolic_weights(euc_w, kappa)
         hyp_pole  = hyperbolic_weights(geo,   kappa)
+
+        # Transform pseudo-coordinate magnitude hyperbolically, preserve direction.
+        mag    = np.linalg.norm(ep_euc, axis=1)
+        hyp_mag = hyperbolic_weights(mag, kappa)
+        sf     = np.where(mag > 1e-8, hyp_mag / mag, 1.0)
+        hyp_ep = (ep_euc * sf[:, np.newaxis]).astype(np.float32)
+
         out = {
-            # Drop-in replacement for data.edge_attr (Marla option 2:
-            # all neighbor distances are hyperbolic).
             "edge_attr":    torch.tensor(np.concatenate([hyp_edges, hyp_edges]), dtype=torch.float32),
-            # Per-node distance to the foveal pole, to use as an extra node
-            # feature alongside data.x (Marla option 1: only fovea distance
-            # is hyperbolic).
+            "edge_pseudo":  torch.tensor(hyp_ep),
             "dist_to_pole": torch.tensor(hyp_pole.astype(np.float32)),
             "kappa": kappa,
         }
         path = out_dir / f"edges_kappa_{kappa}.pt"
         torch.save(out, path)
-        print(f"saved: {path}  edge_attr {tuple(out['edge_attr'].shape)}")
+        print(f"saved: {path}  edge_attr {tuple(out['edge_attr'].shape)}"
+              f"  edge_pseudo {tuple(out['edge_pseudo'].shape)}")
 
 
 def main():
