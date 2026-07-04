@@ -51,7 +51,10 @@ def build_graph(cfg):
 
     # Polar angle = the compass direction of a node around the occipital pole.
     # We measure it in the x-z plane (left-right vs up-down), because those two
-    # axes correspond to the horizontal and vertical axes of the visual field.
+    # axes correspond roughly to the horizontal and vertical axes of the visual field.
+    # This correspondence is an approximation — justified by fMRI retinotopy showing
+    # that the x-z plane of the occipital cortex aligns with the visual field axes
+    # (Sereno et al., 1995, Science 268:889–893).
     # arctan2 converts (dx, dz) into an angle in [-π, π] radians.
     dx          = coords_vis[:, 0] - occipital_pole[0]
     dz          = coords_vis[:, 2] - occipital_pole[2]
@@ -150,6 +153,9 @@ def simulate_prf(graph, cfg):
     stim_x   = stim_ecc * np.cos(stim_ang)
     stim_y   = stim_ecc * np.sin(stim_ang)
 
+    # sigma = pRF size: linear in eccentricity, approximated from Harvey & Dumoulin (2011) Fig. 4A.
+    # Values sigma_base=0.2 and sigma_slope=0.4 are not stated explicitly in the paper
+    # but are consistent with the V1 pRF size vs eccentricity relationship shown there.
     sigma     = prf.get("sigma_base", 0.2) + prf.get("sigma_slope", 0.4) * graph["eccentricity"]
     responses = np.zeros((graph["N"], S), dtype=np.float32)
     for s in range(S):
