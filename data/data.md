@@ -28,7 +28,9 @@ data = ckpt['data']
 | `data.y` | **Prediction target.** `[eccentricity, polar_angle]` per node. Column 0 = eccentricity in degrees, column 1 = polar angle in radians. | `(17263, 2)` | ecc: 0.1–12°, angle: −π … π |
 | `data.edge_index` | Which nodes are connected. Row 0 = source node, row 1 = target node. Each undirected edge appears twice (both directions). | `(2, 102432)` | node indices |
 | `data.edge_attr` | Euclidean edge weights: straight-line distance in mm between two connected nodes. This is the **κ=0 baseline**. | `(102432,)` | 0.24–1.64 mm |
+| `data.edge_pseudo` | Visual-field pseudo-coordinates per directed edge: `(Δvf_x, Δvf_y)` in degrees. For edge u→v: position of v minus position of u in visual field space. Used as SplineConv pseudo-coordinates (Marla option 2). | `(102432, 2)` | degrees |
 | `data.pos` | 3D brain coordinates of each node (MNI space, in mm). | `(17263, 3)` | brain coords |
+| `data.vf_pos` | Visual field coordinates of each node: `(vf_x, vf_y)` in degrees. Cartesian form of `(eccentricity, polar_angle)`. | `(17263, 2)` | degrees |
 | `data.eccentricity_gt` | Ground-truth eccentricity per node (same as `data.y[:, 0]`, stored separately for convenience). | `(17263,)` | 0.1–12° |
 | `data.polar_angle_gt` | Ground-truth polar angle per node (same as `data.y[:, 1]`). | `(17263,)` | −π … π |
 | `data.magnification` | Cortical magnification factor: mm² of cortex per deg² of visual field. High near fovea, low at periphery. Not a training target — useful for analysis. | `(17263,)` | 0.78–1.88 |
@@ -52,6 +54,7 @@ Keyed by κ (float). For each κ value in `config.yaml → hyperbolic → kappa_
 | Field | What it contains | Shape |
 |-------|-----------------|-------|
 | `hyp[κ]['edge_attr']` | Hyperbolic edge weights. Drop-in replacement for `data.edge_attr`. Same shape, bidirectional. | `(102432,)` |
+| `hyp[κ]['edge_pseudo']` | Hyperbolic visual-field pseudo-coordinates. Same direction as `data.edge_pseudo`, magnitude transformed with the κ formula. Drop-in replacement for `data.edge_pseudo`. | `(102432, 2)` |
 | `hyp[κ]['dist_to_pole']` | Hyperbolic distance from each node to the foveal pole. Can be appended as an extra column to `data.x`. | `(17263,)` |
 
 `κ=0.0` gives identical values to the Euclidean baseline.

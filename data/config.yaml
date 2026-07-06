@@ -6,9 +6,13 @@ brain:
   y_threshold: -70.0
 
 retinotopy:
-  # Log-polar cortical magnification model (Schwartz 1980)
-  scale: 15.0     # mm — growth rate of eccentricity with surface distance
-  a_param: 0.5    # deg — foveal offset (eccentricity at the pole)
+  # Log-polar cortical magnification model: e = exp(d / scale) - a
+  # Derived from Schwartz (1980) eq. 8: w = log(z + a), inverted.
+  scale: 15.1     # mm/deg — foveal cortical magnification factor.
+                  # Cowey & Rolls (1974), Table 1, p.452: 15.1 mm/deg at 0° eccentricity.
+                  # (Drasdo 1977 gives 11.5 mm/deg — difference discussed in that paper.)
+  a_param: 1.6    # deg — foveal offset; Schwartz (1980), p.659, citing Drasdo (1977):
+                  # a = 1.6 for human cortex.
   k_param: 0.065  # deg⁻¹ — magnification fall-off (Horton & Hoyt 1991)
   ecc_min: 0.1    # deg — minimum clipped eccentricity
   ecc_max: 12.0   # deg — maximum clipped eccentricity

@@ -8,7 +8,6 @@ from scipy.sparse.csgraph import dijkstra
 import torch
 from torch_geometric.data import Data
 import yaml
-import copy 
 
 
 def load_config(path):
@@ -52,7 +51,10 @@ def build_graph(cfg):
 
     # Polar angle = the compass direction of a node around the occipital pole.
     # We measure it in the x-z plane (left-right vs up-down), because those two
-    # axes correspond to the horizontal and vertical axes of the visual field.
+    # axes correspond roughly to the horizontal and vertical axes of the visual field.
+    # This correspondence is an approximation — justified by fMRI retinotopy showing
+    # that the x-z plane of the occipital cortex aligns with the visual field axes
+    # (Sereno et al., 1995, Science 268:889–893).
     # arctan2 converts (dx, dz) into an angle in [-π, π] radians.
     dx          = coords_vis[:, 0] - occipital_pole[0]
     dz          = coords_vis[:, 2] - occipital_pole[2]
@@ -102,8 +104,8 @@ def build_graph(cfg):
     # This bakes in cortical magnification: the fovea gets exponentially more
     # cortex per degree of visual field than the periphery.
     ret     = cfg["retinotopy"]
-    a_param = ret.get("a_param", 0.5)   # deg   — offset so that distance=0 → ~0° eccentricity
-    scale   = ret.get("scale",   15.0)  # mm    — controls how fast eccentricity grows
+    a_param = ret.get("a_param", 1.6)   # deg   — foveal offset; Schwartz (1980) p.659, citing Drasdo (1977)
+    scale   = ret.get("scale",   15.1)  # mm/deg — foveal magnification; Cowey & Rolls (1974) Table 1 p.452: 15.1 mm/deg
     k_param = ret.get("k_param", 0.065) # deg⁻¹ — magnification fall-off (Horton & Hoyt 1991)
 
     eccentricity  = np.exp(geo_from_pole / scale) - a_param
@@ -151,6 +153,9 @@ def simulate_prf(graph, cfg):
     stim_x   = stim_ecc * np.cos(stim_ang)
     stim_y   = stim_ecc * np.sin(stim_ang)
 
+    # sigma = pRF size: linear in eccentricity, approximated from Harvey & Dumoulin (2011) Fig. 4A.
+    # Values sigma_base=0.2 and sigma_slope=0.4 are not stated explicitly in the paper
+    # but are consistent with the V1 pRF size vs eccentricity relationship shown there.
     sigma     = prf.get("sigma_base", 0.2) + prf.get("sigma_slope", 0.4) * graph["eccentricity"]
     responses = np.zeros((graph["N"], S), dtype=np.float32)
     for s in range(S):
@@ -191,31 +196,31 @@ def make_splits(N, cfg):
 
 
 def hyperbolic_weights(distances, kappa):
-    # Maps Euclidean distances to hyperbolic distances with curvature κ.
-    # Formula: d_hyp = (2/√κ) · arcsinh(√κ/2 · d_euc)
+    # κ-parametrised distance transformation: d_hyp = (2/√κ) · arcsinh(√κ/2 · d_euc)
     # At κ=0 this reduces to d_euc (Euclidean baseline).
-    # At κ>0, large distances are compressed logarithmically — nodes that are
-    # far apart in brain space get a smaller effective distance in the GNN,
-    # which helps for the densely-packed fovea region where Euclidean distances
-    # overestimate how "different" nearby nodes actually are in the visual field.
+    # At κ>0, large distances are compressed more than small ones.
+    #
+    # Note: this is NOT a proper point-to-point distance in hyperbolic space.
+    # The arcsinh form appears in Ganea et al. (2018) but in the context of
+    # point-to-hyperplane distance in the Poincaré ball — a different geometric
+    # quantity. This transformation is motivated by hyperbolic geometry but does
+    # not constitute a mathematically rigorous hyperbolic embedding.
     if kappa == 0.0:
         return distances.copy()
     sq = np.sqrt(kappa)
     return (2.0 / sq) * np.arcsinh((sq / 2.0) * distances)
 
-def spherical_weights(distances, kappa):
-    """Spherical analog: d_sph = (2/√κ) · arcsin(√κ/2 · d_euc).
-       kappa = curvature magnitude (kappa=0 -> Euclidean).
-       DOMAIN: arcsin needs (√κ/2)·d_euc ≤ 1, i.e. kappa ≤ (2/max_dist)²."""
-    if kappa == 0.0:
-        return distances.copy()
-    sq = np.sqrt(kappa)
-    x  = (sq / 2.0) * distances
-    if np.any(x > 1.0):
-        max_k = (2.0 / distances.max())**2
-        raise ValueError(f"arcsin domain exceeded (max arg {x.max():.3f} > 1). "
-                         f"Use kappa < {max_k:.4g} for these distances.")
-    return (2.0 / sq) * np.arcsin(x)
+
+def _vf_pseudo(graph):
+    # Relative visual-field position vectors per directed edge: (Δvf_x, Δvf_y).
+    # Order matches edge_index: first block u→v, second block v→u.
+    u, v  = graph["u_idx"], graph["v_idx"]
+    dvf_x = np.concatenate([graph["vf_x"][v] - graph["vf_x"][u],
+                             graph["vf_x"][u] - graph["vf_x"][v]])
+    dvf_y = np.concatenate([graph["vf_y"][v] - graph["vf_y"][u],
+                             graph["vf_y"][u] - graph["vf_y"][v]])
+    return np.column_stack([dvf_x, dvf_y]).astype(np.float32)  # (2E, 2)
+
 
 def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
     u, v  = graph["u_idx"], graph["v_idx"]
@@ -225,6 +230,7 @@ def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
     # We duplicate each undirected edge, and duplicate the weights accordingly.
     ei = np.vstack([np.concatenate([u, v]), np.concatenate([v, u])])
     ea = np.concatenate([euc_w, euc_w])
+    ep = _vf_pseudo(graph)
 
     # data.x  = pRF responses, shape (N, 100) — the GNN input.
     #           Each row is one node. Each column is one stimulus.
@@ -237,7 +243,10 @@ def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
         x               = torch.tensor(responses, dtype=torch.float32),
         edge_index      = torch.tensor(ei, dtype=torch.long),
         edge_attr       = torch.tensor(ea, dtype=torch.float32),
+        edge_pseudo     = torch.tensor(ep),
         pos             = torch.tensor(graph["coords_vis"], dtype=torch.float32),
+        vf_pos          = torch.tensor(np.column_stack([graph["vf_x"],
+                                                        graph["vf_y"]]).astype(np.float32)),
         y               = torch.tensor(np.column_stack([graph["eccentricity"],
                                                         graph["polar_angle"]]).astype(np.float32)),
         eccentricity_gt = torch.tensor(graph["eccentricity"].astype(np.float32)),
@@ -257,87 +266,35 @@ def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
         'note': 'Same graph for every kappa. Pair with edges_kappa_*.pt files.',
     }}, path)
     print(f"saved: {path}")
-    print(f"  x: {tuple(data.x.shape)}  edge_index: {tuple(data.edge_index.shape)}  y: {tuple(data.y.shape)}")
+    print(f"  x: {tuple(data.x.shape)}  edge_index: {tuple(data.edge_index.shape)}"
+          f"  edge_pseudo: {tuple(data.edge_pseudo.shape)}  y: {tuple(data.y.shape)}")
 
 
 def save_hyperbolic(graph, kappa_values, out_dir):
-    euc_w = graph["euclidean_weights"]
-    geo   = graph["geo_from_pole"]
+    euc_w  = graph["euclidean_weights"]
+    geo    = graph["geo_from_pole"]
+    ep_euc = _vf_pseudo(graph)  # (2E, 2) Euclidean VF pseudo-coordinates
 
     for kappa in kappa_values:
         hyp_edges = hyperbolic_weights(euc_w, kappa)
         hyp_pole  = hyperbolic_weights(geo,   kappa)
+
+        # Transform pseudo-coordinate magnitude hyperbolically, preserve direction.
+        mag    = np.linalg.norm(ep_euc, axis=1)
+        hyp_mag = hyperbolic_weights(mag, kappa)
+        sf     = np.where(mag > 1e-8, hyp_mag / mag, 1.0)
+        hyp_ep = (ep_euc * sf[:, np.newaxis]).astype(np.float32)
+
         out = {
-            # Drop-in replacement for data.edge_attr (Marla option 2:
-            # all neighbor distances are hyperbolic).
             "edge_attr":    torch.tensor(np.concatenate([hyp_edges, hyp_edges]), dtype=torch.float32),
-            # Per-node distance to the foveal pole, to use as an extra node
-            # feature alongside data.x (Marla option 1: only fovea distance
-            # is hyperbolic).
+            "edge_pseudo":  torch.tensor(hyp_ep),
             "dist_to_pole": torch.tensor(hyp_pole.astype(np.float32)),
             "kappa": kappa,
         }
         path = out_dir / f"edges_kappa_{kappa}.pt"
         torch.save(out, path)
-        print(f"saved: {path}  edge_attr {tuple(out['edge_attr'].shape)}")
-        
-
-def recompute_map(base, pole_idx, cfg):
-    """Return a copy of the graph dict with the retinotopic map recomputed
-    for a NEW foveal pole. Reuses the exact formulas from build_graph."""
-    g = dict(base)                      # shallow copy; overwrite map fields only
-    coords, N = base["coords_vis"], base["N"]
-
-    # rebuild adjacency from the stored edges (geometry is unchanged)
-    u, v, w = base["u_idx"], base["v_idx"], base["euclidean_weights"]
-    row = np.concatenate([u, v]); col = np.concatenate([v, u]); dat = np.concatenate([w, w])
-    adj = sp.csr_matrix((dat, (row, col)), shape=(N, N))
-
-    geo = dijkstra(adj, directed=False, indices=pole_idx)
-    if np.isinf(geo).any():
-        raise ValueError("graph disconnected from this pole")
-
-    pole = coords[pole_idx]
-    polar_angle = np.arctan2(coords[:, 2] - pole[2], coords[:, 0] - pole[0])
-
-    ret = cfg["retinotopy"]
-    a, scale, k = ret.get("a_param", 0.5), ret.get("scale", 15.0), ret.get("k_param", 0.065)
-    ecc = np.clip(np.exp(geo / scale) - a, ret.get("ecc_min", 0.1), ret.get("ecc_max", 12.0))
-
-    g.update(
-        occipital_pole_idx=pole_idx, geo_from_pole=geo, polar_angle=polar_angle,
-        eccentricity=ecc, magnification=1.0 / (k * ecc + a),
-        vf_x=ecc * np.cos(polar_angle), vf_y=ecc * np.sin(polar_angle),
-    )
-    return g
-
-
-def make_example(graph, cfg, prf_seed, kappa_values):
-    """Build one Data object: responses + map + Euclidean, hyperbolic and spherical edge_attr."""
-    cfg = copy.deepcopy(cfg)
-    cfg.setdefault("prf", {})["seed"] = prf_seed          # varies stimuli + noise
-    responses = simulate_prf(graph, cfg)
-
-    u, v, euc = graph["u_idx"], graph["v_idx"], graph["euclidean_weights"]
-    ei = np.vstack([np.concatenate([u, v]), np.concatenate([v, u])])
-
-    data = Data(
-        x=torch.tensor(responses, dtype=torch.float32),
-        edge_index=torch.tensor(ei, dtype=torch.long),
-        pos=torch.tensor(graph["coords_vis"], dtype=torch.float32),
-        y=torch.tensor(np.column_stack([graph["eccentricity"],
-                                        graph["polar_angle"]]).astype(np.float32)),
-    )
-    def both(a):  # undirected -> duplicate, shape [2E, 1] ready as SplineConv pseudo
-        return torch.tensor(np.concatenate([a, a])[:, None], dtype=torch.float32)
-
-    data.edge_attr_euc = both(euc)     
-    for kappa in kappa_values:
-        if kappa == 0.0:
-            continue                                     # euclidean already stored
-        data[f"edge_attr_hyp_{kappa}"] = both(hyperbolic_weights(euc, kappa))  # compresses
-        data[f"edge_attr_sph_{kappa}"] = both(spherical_weights(euc, kappa))   # stretches
-    return data
+        print(f"saved: {path}  edge_attr {tuple(out['edge_attr'].shape)}"
+              f"  edge_pseudo {tuple(out['edge_pseudo'].shape)}")
 
 
 def main():
