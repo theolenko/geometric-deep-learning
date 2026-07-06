@@ -17,15 +17,19 @@ prf:
   n_stimuli: 100          # number of simulated visual stimuli
   stim_ecc_max: 10.0      # deg — max eccentricity of stimuli
   sigma_base: 0.2         # deg — pRF size at the fovea (Harvey & Dumoulin 2011)
-  sigma_slope: 0.4        # pRF size growth rate with eccentricity
-  noise_level: 0.01       # std of additive Gaussian noise (mimics fMRI noise)
+  sigma_slope: 0.3        # pRF size growth rate with eccentricity
+  noise_level: 0.05       # std of additive Gaussian noise (mimics fMRI noise)
   seed: 42
 
 hyperbolic:
   # kappa = curvature parameter
   # kappa=0.0 → Euclidean (flat, baseline)
   # kappa>0   → hyperbolic space; higher = stronger curvature
-  kappa_values: [0.0, 0.01, 0.05, 0.1, 0.5, 1.0]
+  curv_values: [0.0, 0.01, 0.05, 0.1, 0.5, 1.0]
+
+spherical: 
+  curv_values: [0.0, 0.01, 0.05, 0.1, 0.5, 1.0]
+
 
 split:
   train: 0.70   # 70% of nodes used for training   → ~12,084 nodes

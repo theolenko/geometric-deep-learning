@@ -8,6 +8,7 @@ from scipy.sparse.csgraph import dijkstra
 import torch
 from torch_geometric.data import Data
 import yaml
+import copy 
 
 
 def load_config(path):
@@ -202,6 +203,19 @@ def hyperbolic_weights(distances, kappa):
     sq = np.sqrt(kappa)
     return (2.0 / sq) * np.arcsinh((sq / 2.0) * distances)
 
+def spherical_weights(distances, kappa):
+    """Spherical analog: d_sph = (2/√κ) · arcsin(√κ/2 · d_euc).
+       kappa = curvature magnitude (kappa=0 -> Euclidean).
+       DOMAIN: arcsin needs (√κ/2)·d_euc ≤ 1, i.e. kappa ≤ (2/max_dist)²."""
+    if kappa == 0.0:
+        return distances.copy()
+    sq = np.sqrt(kappa)
+    x  = (sq / 2.0) * distances
+    if np.any(x > 1.0):
+        max_k = (2.0 / distances.max())**2
+        raise ValueError(f"arcsin domain exceeded (max arg {x.max():.3f} > 1). "
+                         f"Use kappa < {max_k:.4g} for these distances.")
+    return (2.0 / sq) * np.arcsin(x)
 
 def save_groundtruth(graph, responses, train_mask, val_mask, test_mask, path):
     u, v  = graph["u_idx"], graph["v_idx"]
@@ -266,6 +280,64 @@ def save_hyperbolic(graph, kappa_values, out_dir):
         path = out_dir / f"edges_kappa_{kappa}.pt"
         torch.save(out, path)
         print(f"saved: {path}  edge_attr {tuple(out['edge_attr'].shape)}")
+        
+
+def recompute_map(base, pole_idx, cfg):
+    """Return a copy of the graph dict with the retinotopic map recomputed
+    for a NEW foveal pole. Reuses the exact formulas from build_graph."""
+    g = dict(base)                      # shallow copy; overwrite map fields only
+    coords, N = base["coords_vis"], base["N"]
+
+    # rebuild adjacency from the stored edges (geometry is unchanged)
+    u, v, w = base["u_idx"], base["v_idx"], base["euclidean_weights"]
+    row = np.concatenate([u, v]); col = np.concatenate([v, u]); dat = np.concatenate([w, w])
+    adj = sp.csr_matrix((dat, (row, col)), shape=(N, N))
+
+    geo = dijkstra(adj, directed=False, indices=pole_idx)
+    if np.isinf(geo).any():
+        raise ValueError("graph disconnected from this pole")
+
+    pole = coords[pole_idx]
+    polar_angle = np.arctan2(coords[:, 2] - pole[2], coords[:, 0] - pole[0])
+
+    ret = cfg["retinotopy"]
+    a, scale, k = ret.get("a_param", 0.5), ret.get("scale", 15.0), ret.get("k_param", 0.065)
+    ecc = np.clip(np.exp(geo / scale) - a, ret.get("ecc_min", 0.1), ret.get("ecc_max", 12.0))
+
+    g.update(
+        occipital_pole_idx=pole_idx, geo_from_pole=geo, polar_angle=polar_angle,
+        eccentricity=ecc, magnification=1.0 / (k * ecc + a),
+        vf_x=ecc * np.cos(polar_angle), vf_y=ecc * np.sin(polar_angle),
+    )
+    return g
+
+
+def make_example(graph, cfg, prf_seed, kappa_values):
+    """Build one Data object: responses + map + Euclidean, hyperbolic and spherical edge_attr."""
+    cfg = copy.deepcopy(cfg)
+    cfg.setdefault("prf", {})["seed"] = prf_seed          # varies stimuli + noise
+    responses = simulate_prf(graph, cfg)
+
+    u, v, euc = graph["u_idx"], graph["v_idx"], graph["euclidean_weights"]
+    ei = np.vstack([np.concatenate([u, v]), np.concatenate([v, u])])
+
+    data = Data(
+        x=torch.tensor(responses, dtype=torch.float32),
+        edge_index=torch.tensor(ei, dtype=torch.long),
+        pos=torch.tensor(graph["coords_vis"], dtype=torch.float32),
+        y=torch.tensor(np.column_stack([graph["eccentricity"],
+                                        graph["polar_angle"]]).astype(np.float32)),
+    )
+    def both(a):  # undirected -> duplicate, shape [2E, 1] ready as SplineConv pseudo
+        return torch.tensor(np.concatenate([a, a])[:, None], dtype=torch.float32)
+
+    data.edge_attr_euc = both(euc)     
+    for kappa in kappa_values:
+        if kappa == 0.0:
+            continue                                     # euclidean already stored
+        data[f"edge_attr_hyp_{kappa}"] = both(hyperbolic_weights(euc, kappa))  # compresses
+        data[f"edge_attr_sph_{kappa}"] = both(spherical_weights(euc, kappa))   # stretches
+    return data
 
 
 def main():
