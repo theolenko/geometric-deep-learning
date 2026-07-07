@@ -1,0 +1,11 @@
+data: 
+  split_ratios: [0.6, 0.2, 0.2]
+  seed: 0 
+dim: 1
+n_resp: 100
+kernel_s: 10 
+running_params: 
+  exp_dir : "model/first_try"
+  patience: 5 
+  device: 'cpu'
+  epochs: 100
