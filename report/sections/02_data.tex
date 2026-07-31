@@ -24,7 +24,7 @@ Geodesic surface distances are computed via Dijkstra's algorithm on this weighte
 The geodesic distance $d_\text{geo}$ from each node to the occipital pole is converted to
 visual field eccentricity using a cortical magnification law of the form $D(r) = A\log(r+B)$~\cite{schwartz1980}.
 We set $B = 1.6$, following the human magnification model of~\citet{drasdo1977} as cited by~\citet{schwartz1980},
-and $A = 15.1\,\text{mm/deg}$, the foveal magnification factor reported by Cowey and Rolls~\cite{cowey1974}:
+and $A = 15.1\,\text{mm/deg}$, the foveal magnification factor reported by~\citet{cowey1974}:
 \begin{equation}
   \varepsilon = \exp\!\left(\frac{d_\text{geo}}{15.1}\right) - 1.6,
   \quad \varepsilon \in [0.1^\circ,\, 12^\circ].
