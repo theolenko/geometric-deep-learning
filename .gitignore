@@ -218,5 +218,24 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# presenetations
-.pptx
+# presentations
+*.pptx
+
+# LaTeX build artifacts
+*.pdf
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+
+# data files
+data/datasets/
+data/surfaces/
