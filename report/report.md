@@ -22,7 +22,7 @@ report/
 ├── neurips_2026.sty          # NeurIPS 2026 style file
 ├── references.bib            # bibliography
 ├── sections/
-│   ├── 01_introduction.tex   # Theodor
+│   ├── 01_introduction.tex   # Lara
 │   ├── 02_data.tex           # Theodor
 │   └── 03_methodology.tex    # Marla
 └── report.md                 # this file
