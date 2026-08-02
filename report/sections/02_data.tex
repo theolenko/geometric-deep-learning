@@ -1,0 +1,67 @@
+\section{Data \& Synthetic Sampling}
+\label{sec:data}
+
+\subsection{Brain Surface Mesh and Graph Construction}
+
+We use midthickness cortical surface meshes from the Human Connectome Project (HCP)~\cite{vanessen2013hcp},
+consisting of approximately 32{,}492 vertices per hemisphere.
+For each subject we extract the left hemisphere and restrict our analysis to an occipital patch
+defined as all vertices within a geodesic radius of 40\,mm from the occipital pole, a threshold
+chosen to approximately capture the extent of primary visual cortex (V1)~\cite{wandell2007}.
+
+The occipital pole is identified as the most posterior vertex (minimum $y$-coordinate in MNI space)
+and serves as the foveal anchor point, consistent with the observation that the foveal representation
+lies just anterior to the occipital pole~\cite{sereno1995borders}.
+
+From the triangulated mesh we build an undirected graph $G = (V, E)$ where vertices $V$ correspond to
+cortical nodes and edges $E$ connect nodes sharing a triangle edge.
+Edge weights are set to the Euclidean distance between the 3D coordinates of connected nodes (in mm).
+Geodesic surface distances are computed via Dijkstra's algorithm on this weighted graph.
+
+\subsection{Synthetic Retinotopic Map}
+
+\paragraph{Eccentricity.}
+The geodesic distance $d_\text{geo}$ from each node to the occipital pole is converted to
+visual field eccentricity using a cortical magnification law of the form $D(r) = A\log(r+B)$~\cite{schwartz1980}.
+We set $B = 1.6$, following the human magnification model of~\citet{drasdo1977} as cited by~\citet{schwartz1980},
+and $A = 15.1\,\text{mm/deg}$, the foveal magnification factor reported by~\citet{cowey1974}:
+\begin{equation}
+  \varepsilon = \exp\!\left(\frac{d_\text{geo}}{15.1}\right) - 1.6,
+  \quad \varepsilon \in [0.1^\circ,\, 12^\circ].
+\end{equation}
+
+\paragraph{Polar angle.}
+The polar angle $\theta$ encodes the compass direction of each node around the occipital pole,
+following the concept of polar-angle retinotopic mapping established by phase-encoded fMRI~\cite{sereno1995borders},
+computed here in the $x$-$z$ plane of MNI space:
+\begin{equation}
+  \theta_i = \arctan2\!\left(z_i - z_\text{pole},\; x_i - x_\text{pole}\right).
+\end{equation}
+The $x$-$z$ plane of the brain approximates the visual field plane for the left hemisphere,
+so $\theta$ corresponds to the direction in the right visual hemifield.
+
+\paragraph{Visual field coordinates.}
+Eccentricity and polar angle are converted to Cartesian visual field coordinates:
+\begin{equation}
+  \mathrm{vf\_x}_i = \varepsilon_i \cos\theta_i, \qquad
+  \mathrm{vf\_y}_i = \varepsilon_i \sin\theta_i.
+\end{equation}
+
+\subsection{pRF Signal Simulation}
+
+We simulate population receptive field (pRF) responses following the Gaussian pRF model~\cite{dumoulin2008}.
+For each of $S = 100$ randomly placed stimuli, the response of node $i$ is:
+\begin{equation}
+  r_{i,s} = \exp\!\left(-\frac{1}{2}\left(\frac{d_{i,s}}{\sigma_i}\right)^{\!2}\right),
+\end{equation}
+where $d_{i,s} = \|\mathrm{vf}_i - \mathrm{stim}_s\|_2$ is the distance between the node's preferred
+visual field position and stimulus $s$ (in degrees), and $\sigma_i$ is the pRF size:
+\begin{equation}
+  \sigma_i = 0.5 + 0.15\,\varepsilon_i.
+\end{equation}
+The linear scaling of $\sigma$ with eccentricity reflects cortical magnification:
+peripheral nodes have larger receptive fields and thus respond to a broader range of stimulus positions,
+consistent with the V1 pRF size-eccentricity relationship reported by~\citet{harvey2011}
+(intercept and slope derived from their reported pRF size at $4^\circ$ eccentricity and slope-to-intercept ratio).
+The resulting feature matrix $X \in \mathbb{R}^{N \times 100}$ forms the GNN input.
+
