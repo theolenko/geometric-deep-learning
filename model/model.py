@@ -71,7 +71,7 @@ class ConvNet(torch.nn.Module):
         x = self.bn7(x)
         x = F.dropout(x, p=.10, training=self.training)
         
-        x = F.elu(self.conv8(x, edge_index, pseudo))
+        x = self.conv8(x, edge_index, pseudo)
         return x
         
         
