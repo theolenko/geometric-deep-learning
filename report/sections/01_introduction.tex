@@ -1,12 +1,59 @@
 \section{Introduction}
 \label{sec:intro}
 
-TODO
+The visual field is mapped onto the surface of early visual cortex in a
+topographic manner known as a retinotopic map. Each cortical location is assigned
+two visual-field coordinates, eccentricity (distance from the fovea, the centre
+of gaze) and polar angle (direction), and neighbouring visual-field positions map to neighbouring
+cortical positions~\cite{wandell2007,sereno1995borders}. The mapping is
+non-uniform: through cortical magnification the cortex devotes disproportionately
+more surface to the fovea than to the periphery~\cite{cowey1974,schwartz1980}, so
+the map is continuous but geometrically warped. Because this functional
+organisation is closely tied to cortical anatomy, it can in principle be predicted
+from structure alone.
 
 \subsection{Motivation}
+\label{sec:motivation}
 
-TODO
+Retinotopic maps are conventionally obtained through functional MRI, in which
+controlled visual stimuli are presented while cortical responses are recorded and
+fitted with a population receptive field (pRF) model~\cite{dumoulin2008}. Such
+mapping is accurate but expensive in scan time, impractical for some populations,
+and must be repeated for every individual. This has motivated computational models
+that infer the retinotopic map instead of measuring it in full for each
+subject~\cite{ribeiro2021}, reducing the amount of functional data required.
+
+Our contribution concerns the geometry such models operate on rather than the
+prediction target itself. These models represent the cortical surface as a mesh of
+vertices (discrete surface points) and aggregate information over neighbouring
+vertices using distances measured with a Euclidean (flat) metric. Yet cortical
+magnification warps the retinotopic map, so that equal steps across the visual
+field do not correspond to equal steps across the cortex~\cite{cowey1974,schwartz1980};
+a flat metric therefore matches this warped geometry only approximately. This
+suggests measuring inter-vertex distances with a curved metric that follows the
+same non-uniformity, and may thereby align better with the underlying anatomy. We
+ask whether a curved rather than a Euclidean metric recovers the warped map more
+accurately, and we study this in a controlled synthetic setting where the
+ground-truth map is known exactly (Section~\ref{sec:data}).
 
 \subsection{Related Work}
+\label{sec:related}
 
-TODO
+Retinotopic organisation has traditionally been estimated by warping analytic
+templates to an individual's cortical anatomy, which capture coarse structure but
+assume a fixed structure--function relationship and cannot express finer
+individual variation. \citet{ribeiro2021} removed this assumption using geometric
+deep learning, applying spline-based (B-spline) convolutions directly to the
+cortical surface mesh to predict eccentricity and polar angle at every vertex.
+Within their model, the surface convolution measures the relative positions of
+neighbouring vertices with a Euclidean metric on their 3D coordinates. We take
+this model as our baseline and change only this metric, replacing it with a
+constant-curvature (hyperbolic or spherical) metric controlled by a single
+parameter $\kappa$. Setting $\kappa = 0$ recovers the Euclidean (flat) metric,
+matching the choice of~\citet{ribeiro2021}, so that within our experiments any
+difference in performance is attributable to the curvature alone, with the
+architecture and training objective otherwise unchanged. Our setup also differs in
+the network input: rather than the anatomical features (cortical curvature and
+myelin) used by~\citet{ribeiro2021}, we drive the network with simulated pRF
+responses defined on synthetic retinotopic maps, which gives full control over the
+known ground-truth geometry (Section~\ref{sec:data}).
