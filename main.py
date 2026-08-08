@@ -11,8 +11,8 @@ from data.generate_data_mult_maps import _tag
 
 
 def build_distance_keys(gen_cfg):
-    # keys = ["edge_attr_euc"] already done 
-    keys = [f"edge_attr_hyp_{_tag(k)}" for k in gen_cfg["hyperbolic"]["curv_values"]]
+    keys = ["edge_attr_euc"] 
+    keys += [f"edge_attr_hyp_{_tag(k)}" for k in gen_cfg["hyperbolic"]["curv_values"]]
     keys += [f"edge_attr_sph_{_tag(k)}" for k in gen_cfg["spherical"]["curv_values"]]
     return keys
 
