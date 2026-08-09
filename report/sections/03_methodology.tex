@@ -1,10 +1,10 @@
 \section{Methodology \& Results}
 \label{sec:method}
 
-\subsection{Model and Hyperbolic Calculation}
+\subsection{Model and Distance Calculation}
 
 To predict retinotopic maps, we constructed graph neural networks (GNNs) based on BSpline convolutions,
-following the architecture of Ribeiro et.\ al.\ \cite{ribeiro2021}.
+following the architecture of Ribeiro et. al.\ \cite{ribeiro2021}.
 In this type of convolution, the piecewise polynomial functions of a BSpline update the values of the vertices
 through kernel values that act as the convolutional weights.
 The information entering these kernels comes from the edges between vertices.
@@ -20,8 +20,8 @@ We used a degree of 1, meaning a control weight's influence is interpolated line
 Introduced by \cite{fey2018splinecnn}, this BSpline convolution lets information propagate through a graph
 even when nodes differ in their number of neighbors, while still accounting for the importance of each individual neighbor.
 
-While \cite{ribeiro2021} used anatomical features as their edge values, we instead used the distance between two
-neighboring vertices. To investigate whether the curvature in the response distribution, which arises from cortical
+While \cite{ribeiro2021} used the relative positions of neighbouring vertices as their edge values, we instead used the distance between two neighbouring vertices.
+To investigate whether the curvature in the response distribution, which arises from cortical
 magnification, can be better explained by a locally curved geometry, we changed the way this distance is calculated.
 This in turn changes the input to the BSpline kernels and, with it, how information is convolved across the network.
 
@@ -50,7 +50,7 @@ eccentricity and polar angle of that node. These predictions were compared again
 mapped earlier using the smooth L1 loss, which is less sensitive to outliers than a plain squared error.
 
 The dataset of 164 meshes was split into training, validation and test sets containing $60\%$, $20\%$ and
-$20\%$ of the meshes (98, 33 and 33 meshes), using the same split for all seven models. We trained with a
+$20\%$ of the meshes (98, 33 and 33 meshes), using the same split for all six models. We trained with a
 batch size of 1 for a maximum of 100 epochs, applying early stopping with a patience of 5 epochs on the
 validation loss. We used the Adam optimizer with a learning rate of $0.01$.
 
@@ -77,7 +77,7 @@ validation loss. We used the Adam optimizer with a learning rate of $0.01$.
   \end{tabular}
 \end{table}
 
-In total we trained seven networks that differ only in the distance function used to compute the edge values
+In total we trained six networks that differ only in the distance function used to compute the edge values
 between neighboring vertices. We trained one Euclidean model, three hyperbolic models with curvatures $k$ ranging from
 $0.01$ to $1.0$, and two spherical models with $k = 0.01$ and $k = 0.05$. The spherical curvature is bounded
 from above by the longest edge in the graph. Since the argument of the arcsine, $\tfrac{\sqrt{k}}{2}\, d_{euc}$,
